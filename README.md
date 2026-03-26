@@ -4,16 +4,17 @@ A specialized tool designed to extract, translate, and repack **TextAssets** fro
 
 
 ## How to Use
-1. **Launch the App:** Open the executable.
-2. **Load Assets:**
+1. **Clone the repository:**
+2. **Launch the app:** run the command > python3 main_app.py (in the project directory)
+3. **Load Assets:**
    * Click on **"Open .assets"**.
    * Navigate to your game installation folder.
    * Enter the `ragingloop_Data` directory.
    * Open the `resource.assets` file.
-3. **Locate TextAssets:**
+4. **Locate TextAssets:**
    * The available files will appear on the **left panel**.
    * *Note: Initial game texts are located in `scenario01_start` (separate files for Japanese and English).*
-4. **Translate:**
+5. **Translate:**
    * Select a **TextAsset** from the list.
    * Lines will appear in the **Script Lines** panel.
    * Select a line and start translating your text.
