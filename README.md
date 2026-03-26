@@ -14,6 +14,8 @@ A specialized tool designed to extract, translate, and repack **TextAssets** fro
 4. **Locate TextAssets:**
    * The available files will appear on the **left panel**.
    * *Note: Initial game texts are located in `scenario01_start` (separate files for Japanese and English).*
+   * *Note 2: If you see some TextAssets empty is because the format is not compatible yet (I will try to add it.*
+
 5. **Translate:**
    * Select a **TextAsset** from the list.
    * Lines will appear in the **Script Lines** panel.
