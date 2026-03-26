@@ -3,8 +3,8 @@ from PySide6.QtWidgets import (
     QPushButton, QDialog, QLineEdit,
     QListWidget, QListWidgetItem, QCheckBox, QDialogButtonBox,
 )
-from PySide6.QtCore  import Qt, Signal
-from PySide6.QtGui   import QKeySequence, QShortcut
+from PySide6.QtCore  import Qt, Signal, QTimer
+from PySide6.QtGui   import QKeySequence, QShortcut, QFont
 
 from translation_store import (
     TranslationStore,
@@ -19,19 +19,9 @@ STATUS_BUTTON_STYLES = {
 }
 
 CONTEXT_WINDOW = 5  
+MAX_LINE_LENGTH = 70
 
 class EditorPanel(QWidget):
-    """
-    Panel derecho de edición de traducciones.
-
-    Señales:
-        translation_changed(int line_index, str new_text)
-            → emitida cuando el usuario modifica el texto de la traducción
-        status_changed(int line_index, str new_status)
-            → emitida cuando el usuario cicla el estado
-        navigate_requested(int delta)
-            → +1 para siguiente línea, -1 para anterior
-    """
     translation_changed = Signal(int, str)
     status_changed      = Signal(int, str)
     navigate_requested  = Signal(int)
@@ -44,6 +34,10 @@ class EditorPanel(QWidget):
         self._all_lines  = []     
         self._blocking   = False  
 
+        self._db_timer = QTimer()
+        self._db_timer.setSingleShot(True)
+        self._db_timer.timeout.connect(self._emit_delayed_change)
+
         self._build_ui()
         self._setup_shortcuts()
 
@@ -53,7 +47,7 @@ class EditorPanel(QWidget):
         layout.setSpacing(6)
 
         info_row = QHBoxLayout()
-        self._line_info = QLabel("Ninguna línea seleccionada")
+        self._line_info = QLabel("No line selected")
         self._line_info.setObjectName("panel_header")
         info_row.addWidget(self._line_info)
         info_row.addStretch()
@@ -62,46 +56,53 @@ class EditorPanel(QWidget):
         self._status_btn.setFixedWidth(140)
         self._status_btn.clicked.connect(self._on_cycle_status)
         self._status_btn.setToolTip(
-            "Clic para cambiar el estado: Sin traducir → Borrador → Revisado"
+            "Click to change status: Untranslated \u2192 Draft \u2192 Reviewed"
         )
         info_row.addWidget(self._status_btn)
         layout.addLayout(info_row)
 
-        layout.addWidget(self._section_label("🔍 Contexto de escena"))
+        layout.addWidget(self._section_label("Scene Context"))
         self._context_view = QTextEdit()
         self._context_view.setReadOnly(True)
         self._context_view.setFixedHeight(110)
         self._context_view.setObjectName("context_view")
         layout.addWidget(self._context_view)
 
-        layout.addWidget(self._section_label("📖 Texto Original (Referencia)"))
+        layout.addWidget(self._section_label("Original Text (Reference)"))
         self._ref_view = QTextEdit()
         self._ref_view.setReadOnly(True)
         self._ref_view.setObjectName("ref_view")
         layout.addWidget(self._ref_view)
 
-        layout.addWidget(self._section_label("✏️  Traducción"))
+        layout.addWidget(self._section_label("Translation"))
         self._translation_edit = QTextEdit()
         self._translation_edit.setObjectName("translation_edit")
-        self._translation_edit.setPlaceholderText("Escribe aquí la traducción…")
+        self._translation_edit.setPlaceholderText("Type translation here...")
+        
+        mono_font = QFont("Consolas", 11)
+        if not mono_font.exactMatch():
+            mono_font = QFont("Courier New", 11)
+        mono_font.setStyleHint(QFont.Monospace)
+        self._translation_edit.setFont(mono_font)
+
         self._translation_edit.textChanged.connect(self._on_text_changed)
         layout.addWidget(self._translation_edit)
 
         nav_row = QHBoxLayout()
 
-        self._prev_btn = QPushButton("← Anterior")
+        self._prev_btn = QPushButton("\u2190 Previous")
         self._prev_btn.clicked.connect(lambda: self.navigate_requested.emit(-1))
         nav_row.addWidget(self._prev_btn)
 
         nav_row.addStretch()
 
-        self._char_counter = QLabel("0 caracteres")
+        self._char_counter = QLabel(f"0 | {MAX_LINE_LENGTH}")
         self._char_counter.setObjectName("progress_label")
         nav_row.addWidget(self._char_counter)
 
         nav_row.addStretch()
 
-        self._next_btn = QPushButton("Siguiente →")
+        self._next_btn = QPushButton("Next \u2192")
         self._next_btn.clicked.connect(lambda: self.navigate_requested.emit(+1))
         nav_row.addWidget(self._next_btn)
 
@@ -117,7 +118,6 @@ class EditorPanel(QWidget):
         sc = QShortcut(QKeySequence("Ctrl+Return"), self)
         sc.activated.connect(self._shortcut_approve_and_next)
 
-        # Alt+→ / Alt+← → navegación
         QShortcut(QKeySequence("Alt+Right"), self).activated.connect(
             lambda: self.navigate_requested.emit(+1)
         )
@@ -137,7 +137,7 @@ class EditorPanel(QWidget):
         line = self._all_lines[line_index]
 
         self._line_info.setText(
-            f"Línea {line_index}  ·  Personaje: {line['name']}  ·  Escena: {line['scene_id']}"
+            f"Line {line_index}  \u00b7  Character: {line['name']}  \u00b7  Scene: {line['scene_id']}"
         )
 
         self._load_context(line_index)
@@ -152,7 +152,6 @@ class EditorPanel(QWidget):
 
     def clear(self) -> None:
         self._clear()
-
 
     def _load_context(self, center: int) -> None:
         translatable_indices = [
@@ -187,9 +186,15 @@ class EditorPanel(QWidget):
     def _on_text_changed(self) -> None:
         if self._blocking or self._line_index == -1:
             return
+        
+        self._update_char_counter()
+        self._db_timer.start(300)
+
+    def _emit_delayed_change(self) -> None:
+        if self._line_index == -1:
+            return
         new_text = self._translation_edit.toPlainText()
         self.translation_changed.emit(self._line_index, new_text)
-        self._update_char_counter()
 
     def _on_cycle_status(self) -> None:
         if self._line_index == -1 or not self._unique_id:
@@ -214,18 +219,22 @@ class EditorPanel(QWidget):
 
     def _update_char_counter(self) -> None:
         n = len(self._translation_edit.toPlainText())
-        self._char_counter.setText(f"{n} caracteres")
+        self._char_counter.setText(f"{n} | {MAX_LINE_LENGTH}")
+        if n > MAX_LINE_LENGTH:
+            self._char_counter.setStyleSheet("color: #E57373; font-weight: bold;")
+        else:
+            self._char_counter.setStyleSheet("color: #ccc; font-weight: normal;")
 
     def _clear(self) -> None:
         self._blocking = True
-        self._line_info.setText("Ninguna línea seleccionada")
+        self._line_info.setText("No line selected")
         self._context_view.clear()
         self._ref_view.clear()
         self._translation_edit.clear()
         self._blocking = False
         self._status_btn.setText(STATUS_LABELS[STATUS_UNTRANSLATED])
         self._status_btn.setStyleSheet(STATUS_BUTTON_STYLES[STATUS_UNTRANSLATED])
-        self._char_counter.setText("0 caracteres")
+        self._char_counter.setText(f"0 | {MAX_LINE_LENGTH}")
 
 
 class GlobalSearchDialog(QDialog):
@@ -234,7 +243,7 @@ class GlobalSearchDialog(QDialog):
     def __init__(self, store: TranslationStore, parent=None):
         super().__init__(parent)
         self.store = store
-        self.setWindowTitle("Búsqueda Global")
+        self.setWindowTitle("Global Search")
         self.resize(700, 450)
         self._build_ui()
 
@@ -243,19 +252,19 @@ class GlobalSearchDialog(QDialog):
 
         opts_row = QHBoxLayout()
         self._query_edit = QLineEdit()
-        self._query_edit.setPlaceholderText("Buscar texto…")
+        self._query_edit.setPlaceholderText("Search text...")
         self._query_edit.returnPressed.connect(self._do_search)
         opts_row.addWidget(self._query_edit)
 
-        self._in_orig = QCheckBox("En original")
+        self._in_orig = QCheckBox("In original")
         self._in_orig.setChecked(True)
         opts_row.addWidget(self._in_orig)
 
-        self._in_trans = QCheckBox("En traducción")
+        self._in_trans = QCheckBox("In translation")
         self._in_trans.setChecked(True)
         opts_row.addWidget(self._in_trans)
 
-        search_btn = QPushButton("Buscar")
+        search_btn = QPushButton("Search")
         search_btn.clicked.connect(self._do_search)
         opts_row.addWidget(search_btn)
         layout.addLayout(opts_row)
@@ -285,12 +294,12 @@ class GlobalSearchDialog(QDialog):
             line = r["line"]
             label = (
                 f"[{r['unique_id'].split('[')[0].strip()}]  "
-                f"{line['name']}: {line['original_text'][:60]}…"
+                f"{line['name']}: {line['original_text'][:60]}..."
             )
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, (r["unique_id"], r["line_index"]))
             self._results_list.addItem(item)
-        self._count_label.setText(f"{len(results)} resultados encontrados")
+        self._count_label.setText(f"{len(results)} results found")
 
     def _on_double_click(self, item: QListWidgetItem):
         uid, idx = item.data(Qt.UserRole)
